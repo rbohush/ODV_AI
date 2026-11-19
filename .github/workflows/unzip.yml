@@ -1,0 +1,29 @@
+name: Unzip project
+
+on:
+  push:
+    paths: ['project.zip']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  unzip:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unpack archive
+        run: |
+          unzip -o project.zip
+          rm project.zip
+
+      - name: Commit unpacked files
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Unpack project.zip"
+          git push
