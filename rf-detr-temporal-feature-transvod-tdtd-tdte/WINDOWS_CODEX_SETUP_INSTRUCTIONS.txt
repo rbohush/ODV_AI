@@ -1,0 +1,234 @@
+RF-DETR Temporal: инструкция для Codex-агента по подготовке проекта на Windows/CUDA
+================================================================================
+
+Цель
+----
+Настроить проект rf-detr-temporal на Windows для обучения temporal-модификации RF-DETR Small с тремя классами: car, bus, truck. Используется ветка feature/transvod-tdtd-tdte, датасет должен иметь COCO-структуру temporal_dataset_combined_v2 с train2017, val2017 и annotations.
+
+Важно
+-----
+1. Все команды ниже рассчитаны на Windows PowerShell.
+2. Для обучения используется CUDA-видеокарта NVIDIA. Перед запуском нужно проверить, что установлен драйвер NVIDIA и команда nvidia-smi работает.
+3. RF-DETR Small используется как предобученная базовая модель. В текущей схеме базовые веса RF-DETR фиксируются через --freeze-rfdetr-base, а обучаемыми остаются temporal-модули и LoRA/DoRA-адаптеры backbone, включенные через --backbone-lora.
+4. В последнем корректном запуске использовался режим без EMA, поэтому в команде обязательно оставлен флаг --no-ema.
+5. Датасет не входит в чистую копию проекта. Его нужно передать отдельно и положить в корень проекта как temporal_dataset_combined_v2.
+
+
+1. Создание виртуального окружения
+----------------------------------
+Рекомендуется Python 3.11 или 3.12 x64. Создать окружение:
+
+    py -3.11 -m venv .venv-windows
+
+Активировать окружение:
+
+    .\.venv-windows\Scripts\Activate.ps1
+
+Обновить pip:
+
+    python -m pip install --upgrade pip setuptools wheel
+
+2. Установка PyTorch с CUDA
+---------------------------
+Сначала установить PyTorch CUDA-сборки. Для современных драйверов NVIDIA можно использовать CUDA 12.8 wheel:
+
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+
+Если CUDA 12.8 wheel не подходит под драйвер, подобрать актуальную команду на официальной странице PyTorch Get Started и заменить index-url на подходящий вариант.
+
+Проверить CUDA:
+
+    python - <<'PY'
+    import torch
+    print('torch:', torch.__version__)
+    print('cuda available:', torch.cuda.is_available())
+    print('cuda devices:', torch.cuda.device_count())
+    if torch.cuda.is_available():
+        print('device 0:', torch.cuda.get_device_name(0))
+    PY
+
+Ожидаемо:
+
+    cuda available: True
+
+3. Установка зависимостей проекта
+---------------------------------
+Установить локальный RF-DETR с зависимостями для обучения и визуализации:
+
+    pip install -e '.\external\rf-detr[train,visual]'
+
+Установить дополнительные зависимости проекта:
+
+    pip install tensorboard opencv-python pytest pytest-doctestplus
+
+Быстрая проверка импорта:
+
+    python - <<'PY'
+    import torch
+    import cv2
+    from rfdetr import RFDETRSmall
+    print('imports ok')
+    print('cuda:', torch.cuda.is_available())
+    PY
+
+4. Подготовка датасета
+----------------------
+В корне проекта должна быть папка:
+
+    temporal_dataset_combined_v2
+
+Ожидаемая структура:
+
+    temporal_dataset_combined_v2\train2017\*.jpg
+    temporal_dataset_combined_v2\val2017\*.jpg
+    temporal_dataset_combined_v2\annotations\instances_train2017.json
+    temporal_dataset_combined_v2\annotations\instances_val2017.json
+
+В annotations должны использоваться только 3 класса:
+
+    id=1, name=car
+    id=2, name=bus
+    id=3, name=truck
+
+Проверить структуру датасета:
+
+    python - <<'PY'
+    import json
+    from pathlib import Path
+    root = Path('temporal_dataset_combined_v2')
+    for split in ['train', 'val']:
+        ann = root / 'annotations' / f'instances_{split}2017.json'
+        data = json.loads(ann.read_text(encoding='utf-8'))
+        print(split, 'images=', len(data['images']), 'annotations=', len(data['annotations']))
+        print('categories=', [(c['id'], c['name']) for c in data['categories']])
+        missing = [img['file_name'] for img in data['images'][:100] if not (root / f'{split}2017' / img['file_name']).exists()]
+        print('missing in first 100=', len(missing))
+    PY
+
+Для текущей объединенной версии датасета ожидаемые количества:
+
+    train images: 32714
+    train annotations: 126246
+    val images: 8060
+    val annotations: 27850
+    total images: 40774
+    total annotations: 154096
+
+5. Smoke-test перед долгим обучением
+------------------------------------
+Перед полноценным запуском желательно проверить, что пайплайн стартует. Можно запустить одну эпоху в отдельную папку, без подробных performance-логов:
+
+    $env:NO_ALBUMENTATIONS_UPDATE = '1'
+    $env:MPLCONFIGDIR = "$PWD\.tmp\matplotlib"
+    $env:PYTORCH_CUDA_ALLOC_CONF = 'expandable_segments:True'
+    python tools\train_rfdetr_temporal.py `
+      --dataset-root temporal_dataset_combined_v2 `
+      --output-dir result\smoke_temporal_3cls_lora_frozen_cuda `
+      --variant small `
+      --num-classes 3 `
+      --resolution 640 `
+      --backbone-lora `
+      --freeze-rfdetr-base `
+      --temporal-num-ref-frames 3 `
+      --temporal-fusion-layers 1 `
+      --temporal-tdte-layers 1 `
+      --temporal-tdtd-layers 1 `
+      --temporal-ref-frame-mode surrounding `
+      --temporal-ref-frame-step 2 `
+      --temporal-key-frame-position center `
+      --epochs 1 `
+      --batch-size 1 `
+      --grad-accum-steps 4 `
+      --lr 1e-4 `
+      --lr-encoder 1e-5 `
+      --lr-drop 8 `
+      --num-workers 2 `
+      --device cuda:0 `
+      --checkpoint-interval 1 `
+      --realtime-fps-target 30 `
+      --no-ema
+
+Если нужно только проверить старт без ожидания полной эпохи, можно временно сделать копию датасета с малым числом кадров или добавить в код временный лимит. Основную команду ниже запускать только после успешного smoke-test.
+
+6. Основная команда обучения на CUDA
+------------------------------------
+Команда соответствует актуальному запуску temporal-модификации с заморозкой базового RF-DETR, LoRA/DoRA в backbone, тремя temporal-модулями TQE+TDTE+TDTD, 30 эпохами и без EMA:
+
+    $env:NO_ALBUMENTATIONS_UPDATE = '1'
+    $env:MPLCONFIGDIR = "$PWD\.tmp\matplotlib"
+    $env:PYTORCH_CUDA_ALLOC_CONF = 'expandable_segments:True'
+    python tools\train_rfdetr_temporal.py `
+      --dataset-root temporal_dataset_combined_v2 `
+      --output-dir result\rfdetr_temporal_3cls_lora_frozen_rfdetr_noema_30ep_cuda `
+      --variant small `
+      --num-classes 3 `
+      --resolution 640 `
+      --backbone-lora `
+      --freeze-rfdetr-base `
+      --temporal-num-ref-frames 3 `
+      --temporal-fusion-layers 1 `
+      --temporal-tdte-layers 1 `
+      --temporal-tdtd-layers 1 `
+      --temporal-ref-frame-mode surrounding `
+      --temporal-ref-frame-step 2 `
+      --temporal-key-frame-position center `
+      --epochs 30 `
+      --batch-size 1 `
+      --grad-accum-steps 4 `
+      --lr 1e-4 `
+      --lr-encoder 1e-5 `
+      --lr-drop 25 `
+      --num-workers 2 `
+      --device cuda:0 `
+      --checkpoint-interval 5 `
+      --realtime-fps-target 30 `
+      --no-ema
+
+7. Продолжение обучения после прерывания
+----------------------------------------
+Если обучение прервалось, найти последний checkpoint в output-dir. Обычно это last.ckpt или checkpoint epoch. Затем запустить ту же команду, добавив:
+
+    --resume result\rfdetr_temporal_3cls_lora_frozen_rfdetr_noema_30ep_cuda\last.ckpt
+
+Важно: остальные параметры должны совпадать с исходным запуском, особенно num-classes, temporal-num-ref-frames, temporal-ref-frame-mode, temporal-ref-frame-step, temporal-key-frame-position, backbone-lora, freeze-rfdetr-base и no-ema.
+
+8. Что проверить после старта обучения
+--------------------------------------
+1. В логе должно быть видно device cuda:0 или использование CUDA.
+2. torch.cuda.is_available() должен быть True.
+3. Не должно быть падения на чтении датасета.
+4. В result\... должны появиться конфигурационные файлы, logs и checkpoint-файлы.
+5. Если появляется CUDA out of memory, сначала уменьшить num-workers до 0 или 1, затем проверить batch-size=1 и grad-accum-steps=4. Память двух видеокарт при обычном data parallel не складывается для одной копии модели.
+
+9. Важные параметры запуска
+----------------------------
+--num-classes 3: модель обучается только на классах car, bus, truck.
+--backbone-lora: включает LoRA/DoRA-адаптеры в backbone.
+--freeze-rfdetr-base: отключает обучение базовых весов RF-DETR, обучаются temporal-модули и адаптеры.
+--temporal-num-ref-frames 3: к ключевому кадру добавляются 3 опорных кадра.
+--temporal-ref-frame-mode surrounding: используются соседние кадры вокруг ключевого кадра, включая прошлые и будущие кадры.
+--temporal-ref-frame-step 2: опорные кадры выбираются с шагом 2.
+--temporal-key-frame-position center: ключевой кадр располагается в центре temporal-клипа.
+--temporal-fusion-layers 1: включен один слой temporal query fusion / TQE.
+--temporal-tdte-layers 1: включен один слой TDTE.
+--temporal-tdtd-layers 1: включен один слой TDTD.
+--no-ema: отключает EMA, снижая расход памяти и избегая несовпадения с последним рабочим запуском.
+--device cuda:0: обучение запускается на первой CUDA-видеокарте.
+
+10. Артефакты, которые не должны попадать в чистую выгрузку
+-----------------------------------------------------------
+При подготовке проекта для передачи исключить:
+
+    temporal_dataset_combined_v2
+    result
+    results_10ep
+    reports
+    videos
+    .venv-macos
+    .venv-windows
+    .tmp
+    __pycache__
+    .pytest_cache
+    .DS_Store
+
+Датасет и обученные веса передавать отдельно, если они нужны принимающей стороне.

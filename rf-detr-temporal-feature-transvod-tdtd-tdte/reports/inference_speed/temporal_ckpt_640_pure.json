@@ -1,0 +1,36 @@
+{
+  "checkpoint": "D:\\PSU\\rf-detr-temporal\\result\\temporal_30ep\\checkpoint_29.ckpt",
+  "variant": "small",
+  "device": "cuda:0",
+  "dtype": "fp32",
+  "batch_size": 1,
+  "resolution": 640,
+  "backbone_lora": true,
+  "temporal_num_ref_frames": 3,
+  "temporal_key_frame_position": "center",
+  "temporal_tdte_layers": 1,
+  "temporal_tdtd_layers": 1,
+  "evaluated_classes": [
+    "car",
+    "bus"
+  ],
+  "predictions_per_clip": 1,
+  "fps_unit": "key_frames_per_second",
+  "params_m": 37.055264,
+  "torch_version": "2.6.0+cu124",
+  "gpu_name": "NVIDIA GeForce GTX 1050 Ti",
+  "benchmark_type": "pure_model",
+  "timer": "torch.cuda.Event",
+  "input_shape": [
+    1,
+    12,
+    640,
+    640
+  ],
+  "latency_mean_ms": 483.6737060546875,
+  "latency_median_ms": 463.98565673828125,
+  "latency_p95_ms": 528.974853515625,
+  "fps": 2.067509536867264,
+  "key_frames_per_second": 2.067509536867264,
+  "peak_vram_gb": 0.3877387046813965
+}

@@ -1,0 +1,5 @@
+-e external/rf-detr[train,visual]
+tensorboard
+opencv-python
+pytest
+pytest-doctestplus
