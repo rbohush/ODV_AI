@@ -22,8 +22,6 @@ key frame + reference frames
 
 Аннотации используются только для key frame. Reference frames не имеют своего loss. Они нужны как дополнительный контекст.
 
-## Архитектура
-<img width="1280" height="525" alt="image_2026-06-04_13-16-39" src="https://github.com/user-attachments/assets/0d4fc167-9026-4014-bf98-827ae2489f65" />
 
 ### Input Frames
 
